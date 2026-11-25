@@ -222,3 +222,96 @@ test('NoSQL operator injection in login payload is blocked/sanitized', async () 
   });
   assert.equal(res.status, 400);
 });
+
+test('CORS rejects untrusted .run.app origins and omits X-Frame-Options for iframe compatibility', async () => {
+  const res = await fetch(`${baseUrl}/api/health`, {
+    headers: { Origin: 'https://evil-attacker.run.app' },
+  });
+  assert.equal(res.headers.get('access-control-allow-origin'), null);
+  assert.equal(res.headers.get('x-frame-options'), null);
+});
+
+test('CSRF protection rejects state-changing auth request missing Origin and X-Requested-With', async () => {
+  const res = await fetch(`${baseUrl}/api/auth/logout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  assert.equal(res.status, 403);
+});
+
+test('dashboard overview scopes pending leaves and audit activities by role', async () => {
+  const empDash = await apiFetch('/api/dashboard/overview', {
+    headers: { Authorization: `Bearer ${employeeToken}` },
+  });
+  assert.equal(empDash.status, 200);
+  assert.ok(Array.isArray(empDash.data.recentActivities));
+  // Standard employee must not receive Super Admin's audit log entries
+  for (const act of empDash.data.recentActivities) {
+    assert.notEqual(act.actorEmail, 'sarah.chen@calibrehr.io');
+  }
+});
+
+test('avatarUrl rejects dangerous URI schemes and report endpoints enforce integer bounds', async () => {
+  const listRes = await apiFetch('/api/employees', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const firstEmp = listRes.data.items[0];
+
+  const badAvatar = await apiFetch('/api/employees', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({
+      employeeId: 'EMP-9991',
+      fullName: 'Scheme Test',
+      email: 'scheme.test@calibrehr.io',
+      phone: '555-0191',
+      gender: 'Female',
+      dateOfBirth: '1992-05-10',
+      address: '200 Elm St',
+      city: 'Austin',
+      state: 'TX',
+      departmentId: firstEmp.departmentId._id,
+      designationId: firstEmp.designationId._id,
+      joiningDate: '2026-11-01',
+      employmentType: 'FULL_TIME',
+      salary: 7500,
+      status: 'ACTIVE',
+      avatarUrl: 'javascript:alert(1)',
+    }),
+  });
+  assert.equal(badAvatar.status, 400);
+
+  const badMonth = await apiFetch('/api/attendance/monthly-report?year=2026&month=99', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(badMonth.status, 400);
+
+  const badBatch = await apiFetch('/api/payroll/generate-batch', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ periodMonth: 'abc', periodYear: 2026 }),
+  });
+  assert.equal(badBatch.status, 400);
+});
+
+test('Super Admin cannot demote or deactivate own account', async () => {
+  const meRes = await apiFetch('/api/auth/me', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(meRes.status, 200);
+  const selfId = meRes.data.user._id;
+
+  const demoteRes = await apiFetch(`/api/dashboard/admin/users/${selfId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ role: 'EMPLOYEE' }),
+  });
+  assert.equal(demoteRes.status, 400);
+
+  const deactivateRes = await apiFetch(`/api/dashboard/admin/users/${selfId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ isActive: false }),
+  });
+  assert.equal(deactivateRes.status, 400);
+});

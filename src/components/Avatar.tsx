@@ -1,4 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+
+function isSafeAvatarSrc(src?: string): boolean {
+  if (!src) return false;
+  if (src.startsWith('/') && !src.startsWith('//')) return true;
+  try {
+    const parsed = new URL(src);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
 
 export function Avatar({
   src,
@@ -10,6 +21,10 @@ export function Avatar({
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    setErrored(false);
+  }, [src]);
 
   const sizeClass =
     size === 'sm'
@@ -27,7 +42,7 @@ export function Avatar({
     .map((p) => p[0]?.toUpperCase() || '')
     .join('');
 
-  if (src && !errored) {
+  if (isSafeAvatarSrc(src) && !errored) {
     return (
       <img
         src={src}

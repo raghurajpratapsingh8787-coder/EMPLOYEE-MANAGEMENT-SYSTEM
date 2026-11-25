@@ -57,7 +57,26 @@ export const employeeCreateSchema = z.object({
     .or(z.literal(''))
     .transform((v) => (v === '' ? undefined : v)),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ON_LEAVE', 'TERMINATED']).default('ACTIVE'),
-  avatarUrl: z.string().trim().max(500).optional(),
+  avatarUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (val) => {
+        if (!val) return true;
+        if (val.startsWith('/src/assets/') || val.startsWith('/api/employees/')) {
+          return !val.includes('..');
+        }
+        try {
+          const parsed = new URL(val);
+          return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+        } catch {
+          return false;
+        }
+      },
+      { message: 'Avatar URL must be a valid HTTP(S) URL or internal asset path' }
+    )
+    .optional(),
 });
 
 export const employeeUpdateSchema = employeeCreateSchema.partial();
@@ -154,3 +173,27 @@ export const adminCreateUserSchema = z.object({
     .or(z.literal(''))
     .transform((v) => (v === '' ? undefined : v)),
 });
+
+export const adminUpdateUserSchema = z
+  .object({
+    role: z.enum(['SUPER_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']).optional(),
+    isActive: z.boolean().optional(),
+  })
+  .refine((data) => data.role !== undefined || data.isActive !== undefined, {
+    message: 'At least one field (role or isActive) must be provided',
+  });
+
+export const bulkEmployeeStatusSchema = z.object({
+  ids: z.array(z.string().regex(objectIdRegex, 'Invalid employee ID')).min(1).max(100),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ON_LEAVE', 'TERMINATED']),
+});
+
+export const payrollBatchSchema = z.object({
+  periodMonth: z.coerce.number().int().min(1).max(12),
+  periodYear: z.coerce.number().int().min(2020).max(2100),
+  allowanceRatePct: z.coerce.number().finite().min(0).max(100).default(12),
+  deductionRatePct: z.coerce.number().finite().min(0).max(100).default(8),
+});
+
+export const yearQuerySchema = z.coerce.number().int().min(2020).max(2100);
+export const monthQuerySchema = z.coerce.number().int().min(1).max(12);

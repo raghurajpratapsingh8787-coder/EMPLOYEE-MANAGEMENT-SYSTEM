@@ -10,7 +10,11 @@ import { LeaveBalance } from '../models/LeaveBalance';
 import { PerformanceReview } from '../models/PerformanceReview';
 import { Payroll } from '../models/Payroll';
 import { AuditLog } from '../models/AuditLog';
-import { employeeCreateSchema, employeeUpdateSchema } from '../validators/schemas';
+import {
+  bulkEmployeeStatusSchema,
+  employeeCreateSchema,
+  employeeUpdateSchema,
+} from '../validators/schemas';
 import { AppError } from '../middleware/security';
 import { canViewSalary, isHrOrAdmin } from '../utils/rbac';
 import { detectSafeImageType, resolveConfinedPath } from '../utils/securityHelpers';
@@ -377,19 +381,15 @@ export async function deleteEmployee(req: Request, res: Response): Promise<void>
 }
 
 export async function bulkUpdateEmployeeStatus(req: Request, res: Response): Promise<void> {
-  const { ids, status } = req.body as { ids?: unknown; status?: unknown };
-  if (
-    !Array.isArray(ids) ||
-    ids.length === 0 ||
-    typeof status !== 'string' ||
-    !['ACTIVE', 'INACTIVE', 'ON_LEAVE', 'TERMINATED'].includes(status)
-  ) {
-    throw new AppError(400, 'Provide valid employee IDs and target status');
-  }
+  const { ids, status } = bulkEmployeeStatusSchema.parse(req.body);
+  const validIds = Array.from(new Set(ids));
 
-  const validIds = ids.filter((id): id is string => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id));
-  if (validIds.length === 0) {
-    throw new AppError(400, 'No valid employee IDs provided');
+  if (
+    (status === 'INACTIVE' || status === 'TERMINATED') &&
+    req.auth!.employeeId &&
+    validIds.includes(req.auth!.employeeId)
+  ) {
+    throw new AppError(400, 'You cannot deactivate or terminate your own active employee profile');
   }
 
   const result = await Employee.updateMany({ _id: { $in: validIds } }, { status });
@@ -470,5 +470,16 @@ export async function getEmployeeAvatar(req: Request, res: Response): Promise<vo
     throw new AppError(404, 'Avatar file missing');
   }
 
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType =
+    ext === '.png'
+      ? 'image/png'
+      : ext === '.webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
   res.sendFile(filePath);
 }

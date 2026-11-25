@@ -4,7 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
-import { noSqlSanitizer, errorHandler } from './middleware/security';
+import { AppError, noSqlSanitizer, errorHandler } from './middleware/security';
 import authRoutes from './routes/authRoutes';
 import employeeRoutes from './routes/employeeRoutes';
 import organizationRoutes from './routes/organizationRoutes';
@@ -23,27 +23,43 @@ export function createExpressApp() {
     helmet({
       contentSecurityPolicy: false,
       crossOriginEmbedderPolicy: false,
+      frameguard: false,
     })
   );
 
   app.use(
-    cors({
-      origin: (origin, callback) => {
-        if (!origin) {
-          return callback(null, true);
-        }
-        const normalized = origin.replace(/\/$/, '');
-        if (
-          env.allowedOrigins.includes(normalized) ||
-          normalized.endsWith('.run.app')
-        ) {
-          return callback(null, true);
-        }
-        return callback(new Error('Origin not allowed by CORS policy'));
-      },
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    cors((req, callback) => {
+      const origin = req.headers.origin;
+      if (!origin) {
+        return callback(null, {
+          origin: true,
+          credentials: true,
+          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+        });
+      }
+
+      const normalized = origin.replace(/\/$/, '');
+      const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+        .split(',')[0]
+        .trim();
+      const sameHttps = rawHost ? `https://${rawHost}` : '';
+      const sameHttp = rawHost ? `http://${rawHost}` : '';
+
+      if (
+        env.allowedOrigins.includes(normalized) ||
+        (sameHttps && normalized === sameHttps) ||
+        (sameHttp && normalized === sameHttp)
+      ) {
+        return callback(null, {
+          origin: true,
+          credentials: true,
+          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+        });
+      }
+
+      return callback(new AppError(403, 'Origin not allowed by CORS policy'));
     })
   );
 

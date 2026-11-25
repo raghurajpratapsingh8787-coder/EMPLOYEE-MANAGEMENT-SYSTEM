@@ -29,8 +29,12 @@ export function NotificationsPage() {
   }, [load]);
 
   const markRead = async (id: string) => {
-    await apiRequest(`/api/dashboard/notifications/${id}/read`, { method: 'PATCH' });
-    load();
+    try {
+      await apiRequest(`/api/dashboard/notifications/${id}/read`, { method: 'PATCH' });
+      load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to update notification', 'error');
+    }
   };
 
   return (
@@ -89,7 +93,7 @@ export function NotificationsPage() {
                   <div className="text-xs text-slate-600 dark:text-slate-300">{n.message}</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {n.link && (
+                  {n.link && n.link.startsWith('/') && !n.link.startsWith('//') && (
                     <button
                       type="button"
                       onClick={() => navigate(n.link!)}

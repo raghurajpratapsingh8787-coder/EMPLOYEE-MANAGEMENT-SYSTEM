@@ -2,7 +2,11 @@ import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Attendance } from '../models/Attendance';
 import { Employee } from '../models/Employee';
-import { attendanceUpsertSchema } from '../validators/schemas';
+import {
+  attendanceUpsertSchema,
+  monthQuerySchema,
+  yearQuerySchema,
+} from '../validators/schemas';
 import { AppError } from '../middleware/security';
 import { isHrOrAdmin } from '../utils/rbac';
 import { recordAuditLog } from '../services/auditService';
@@ -74,8 +78,8 @@ export async function getAttendanceDashboard(req: Request, res: Response): Promi
 }
 
 export async function getMonthlyAttendanceReport(req: Request, res: Response): Promise<void> {
-  const year = Number(req.query.year || new Date().getUTCFullYear());
-  const month = Number(req.query.month || new Date().getUTCMonth() + 1);
+  const year = yearQuerySchema.parse(req.query.year ?? new Date().getUTCFullYear());
+  const month = monthQuerySchema.parse(req.query.month ?? new Date().getUTCMonth() + 1);
   const prefix = `${year}-${String(month).padStart(2, '0')}`;
 
   const match: Record<string, unknown> = { date: { $regex: `^${prefix}` } };

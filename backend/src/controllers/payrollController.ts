@@ -4,7 +4,11 @@ import { Payroll } from '../models/Payroll';
 import { Employee } from '../models/Employee';
 import { Notification } from '../models/Notification';
 import { User } from '../models/User';
-import { payrollCreateSchema, payrollStatusSchema } from '../validators/schemas';
+import {
+  payrollBatchSchema,
+  payrollCreateSchema,
+  payrollStatusSchema,
+} from '../validators/schemas';
 import { calculatePayroll, summarizePayrollBatch } from '../utils/payrollCalculator';
 import { AppError } from '../middleware/security';
 import { recordAuditLog } from '../services/auditService';
@@ -137,22 +141,13 @@ export async function createOrUpdatePayroll(req: Request, res: Response): Promis
 }
 
 export async function generateMonthlyBatchPayroll(req: Request, res: Response): Promise<void> {
-  const periodMonth = Number(req.body?.periodMonth || new Date().getUTCMonth() + 1);
-  const periodYear = Number(req.body?.periodYear || new Date().getUTCFullYear());
-  const allowanceRatePct = Number(req.body?.allowanceRatePct ?? 12);
-  const deductionRatePct = Number(req.body?.deductionRatePct ?? 8);
-
-  if (
-    periodMonth < 1 ||
-    periodMonth > 12 ||
-    periodYear < 2020 ||
-    allowanceRatePct < 0 ||
-    allowanceRatePct > 100 ||
-    deductionRatePct < 0 ||
-    deductionRatePct > 100
-  ) {
-    throw new AppError(400, 'Invalid batch payroll period or configuration rates');
-  }
+  const { periodMonth, periodYear, allowanceRatePct, deductionRatePct } =
+    payrollBatchSchema.parse({
+      periodMonth: req.body?.periodMonth ?? new Date().getUTCMonth() + 1,
+      periodYear: req.body?.periodYear ?? new Date().getUTCFullYear(),
+      allowanceRatePct: req.body?.allowanceRatePct ?? 12,
+      deductionRatePct: req.body?.deductionRatePct ?? 8,
+    });
 
   const activeEmployees = await Employee.find({ status: { $in: ['ACTIVE', 'ON_LEAVE'] } }).lean();
   const existingPayrolls = await Payroll.find({ periodMonth, periodYear }).select('employeeId').lean();

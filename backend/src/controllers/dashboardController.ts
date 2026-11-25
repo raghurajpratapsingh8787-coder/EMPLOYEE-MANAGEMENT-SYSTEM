@@ -9,16 +9,41 @@ import { AuditLog } from '../models/AuditLog';
 import { Notification } from '../models/Notification';
 import { User } from '../models/User';
 import { Session } from '../models/Session';
-import { adminCreateUserSchema } from '../validators/schemas';
+import { adminCreateUserSchema, adminUpdateUserSchema } from '../validators/schemas';
 import { AppError } from '../middleware/security';
+import { isHrOrAdmin } from '../utils/rbac';
 import { recordAuditLog } from '../services/auditService';
 
-export async function getDashboardOverview(_req: Request, res: Response): Promise<void> {
+export async function getDashboardOverview(req: Request, res: Response): Promise<void> {
   const now = new Date();
   const currentYear = now.getUTCFullYear();
   const currentMonth = now.getUTCMonth() + 1;
   const monthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
   const todayStr = now.toISOString().slice(0, 10);
+
+  const viewerRole = req.auth!.role;
+  const viewerEmpId = req.auth!.employeeId;
+  const isAdmin = isHrOrAdmin(viewerRole);
+
+  let pendingLeaveFilter: Record<string, unknown> = { status: 'PENDING' };
+  if (!isAdmin) {
+    if (viewerRole === 'MANAGER' && viewerEmpId) {
+      const team = await Employee.find({
+        $or: [{ reportingManagerId: viewerEmpId }, { _id: viewerEmpId }],
+      })
+        .select('_id')
+        .lean();
+      pendingLeaveFilter = { status: 'PENDING', employeeId: { $in: team.map((t) => t._id) } };
+    } else if (viewerEmpId) {
+      pendingLeaveFilter = { status: 'PENDING', employeeId: viewerEmpId };
+    } else {
+      pendingLeaveFilter = { _id: null };
+    }
+  }
+
+  const activityFilter: Record<string, unknown> = isAdmin
+    ? {}
+    : { actorUserId: req.auth!.userId };
 
   const [
     allEmployees,
@@ -34,12 +59,12 @@ export async function getDashboardOverview(_req: Request, res: Response): Promis
       .lean(),
     Department.find().lean(),
     Attendance.distinct('date'),
-    LeaveRequest.find({ status: 'PENDING' })
+    LeaveRequest.find(pendingLeaveFilter)
       .populate('employeeId', 'fullName employeeId avatarUrl')
       .sort({ createdAt: -1 })
       .limit(5)
       .lean(),
-    AuditLog.find().sort({ createdAt: -1 }).limit(8).lean(),
+    AuditLog.find(activityFilter).sort({ createdAt: -1 }).limit(8).lean(),
   ]);
 
   const totalEmployees = allEmployees.length;
@@ -199,6 +224,7 @@ export async function listAuditLogs(_req: Request, res: Response): Promise<void>
 
 export async function listAdminUsers(_req: Request, res: Response): Promise<void> {
   const users = await User.find()
+    .select('-passwordHash -resetTokenHash -resetTokenExpires')
     .populate('employeeId', 'employeeId fullName')
     .sort({ createdAt: -1 })
     .lean();
@@ -251,21 +277,26 @@ export async function updateUserRoleOrStatus(req: Request, res: Response): Promi
     throw new AppError(400, 'Invalid user ID');
   }
 
-  const { role, isActive } = req.body as { role?: string; isActive?: boolean };
+  const { role, isActive } = adminUpdateUserSchema.parse(req.body);
   const updates: Record<string, unknown> = {};
-
-  if (role && ['SUPER_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'].includes(role)) {
-    updates.role = role;
-  }
-  if (typeof isActive === 'boolean') {
-    updates.isActive = isActive;
-  }
 
   if (id === req.auth!.userId && isActive === false) {
     throw new AppError(400, 'You cannot deactivate your own Super Admin account');
   }
+  if (id === req.auth!.userId && role && role !== req.auth!.role) {
+    throw new AppError(400, 'You cannot change your own Super Admin role');
+  }
 
-  const updated = await User.findByIdAndUpdate(id, updates, { new: true }).lean();
+  if (role !== undefined) {
+    updates.role = role;
+  }
+  if (isActive !== undefined) {
+    updates.isActive = isActive;
+  }
+
+  const updated = await User.findByIdAndUpdate(id, updates, { new: true })
+    .select('-passwordHash -resetTokenHash -resetTokenExpires')
+    .lean();
   if (!updated) {
     throw new AppError(404, 'User account not found');
   }

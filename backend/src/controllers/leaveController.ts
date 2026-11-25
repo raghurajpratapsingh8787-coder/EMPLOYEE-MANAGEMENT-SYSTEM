@@ -5,7 +5,7 @@ import { LeaveBalance } from '../models/LeaveBalance';
 import { Employee } from '../models/Employee';
 import { Notification } from '../models/Notification';
 import { User } from '../models/User';
-import { leaveCreateSchema, leaveReviewSchema } from '../validators/schemas';
+import { leaveCreateSchema, leaveReviewSchema, yearQuerySchema } from '../validators/schemas';
 import { AppError } from '../middleware/security';
 import {
   calculateLeaveDays,
@@ -49,10 +49,17 @@ export async function listLeaveRequests(req: Request, res: Response): Promise<vo
 }
 
 export async function getLeaveBalances(req: Request, res: Response): Promise<void> {
-  const year = Number(req.query.year || new Date().getUTCFullYear());
+  const year = yearQuerySchema.parse(req.query.year ?? new Date().getUTCFullYear());
   const filter: Record<string, unknown> = { year };
 
-  if (!isHrOrAdmin(req.auth!.role) && req.auth!.employeeId) {
+  if (req.auth!.role === 'MANAGER' && req.auth!.employeeId) {
+    const team = await Employee.find({
+      $or: [{ reportingManagerId: req.auth!.employeeId }, { _id: req.auth!.employeeId }],
+    })
+      .select('_id')
+      .lean();
+    filter.employeeId = { $in: team.map((t) => t._id) };
+  } else if (!isHrOrAdmin(req.auth!.role) && req.auth!.employeeId) {
     filter.employeeId = req.auth!.employeeId;
   }
 

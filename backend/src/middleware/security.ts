@@ -61,7 +61,7 @@ export function csrfOriginCheck(req: Request, res: Response, next: NextFunction)
     return next();
   }
 
-  next();
+  res.status(403).json({ error: 'Missing required CSRF verification header' });
 }
 
 export function errorHandler(
