@@ -1,0 +1,6 @@
+{
+  "name": "Calibre HR",
+  "description": "Enterprise Employee Management System with role-based access control, attendance tracking, leave workflows, configurable payroll, and performance management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
